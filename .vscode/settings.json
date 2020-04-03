@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "gthr.h": "c",
+        "assert.h": "c",
+        "signal.h": "c",
+        "memory.h": "c"
+    }
+}
