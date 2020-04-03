@@ -60,4 +60,4 @@ int gtgo(void( * f)(void));		// create new thread and set f as new "run" functio
 void resetsig(int sig);			// reset signal
 void gthandle(int sig);			// periodically triggered by alarm
 int uninterruptibleNanoSleep(time_t sec, long nanosec);	// uninterruptible sleep
-long get_time(void);
+long get_time_us(void);

@@ -62,21 +62,21 @@ void showStatsHandler(int signum)
   {
     if (gttbl[i].st == Ready || gttbl[i].st == Running)
     {
-      long duration = get_time() - gt_started;
+      long duration = get_time_us() - gt_started;
       printf("%-3d%-10s%-20f%-20f \n", i, gttbl[i].st == Running ? "running" : "ready",
              (double)gttbl[i].stats.total_run_time / (double)duration * 100.0,
              (double)gttbl[i].stats.total_waiting_time / (double)duration * 100.0);
     }
   }
-  if(last_called + 5 * 1000000L < get_time()){
+  if(last_called + 5 * 1000000L < get_time_us()){
     end = 0;
-    printf("last %ld, reset %ld, now %ld, end %d \n", last_called, last_called + 5 * 1000000L,  get_time(), end);
+    printf("last %ld, reset %ld, now %ld, end %d \n", last_called, last_called + 5 * 1000000L,  get_time_us(), end);
   }
   if (++end > 3)
   {
     exit(0);
   }
-  last_called = get_time();
+  last_called = get_time_us();
 }
 int main(void)
 {
