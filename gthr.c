@@ -38,7 +38,38 @@ void __attribute__((noreturn)) gtret(int ret)
     ; // if initial thread, wait for other to terminate
   exit(ret);
 }
-
+static void set_wait_stats()
+{
+  long wait_time = get_time_us() - gtcur->stats.last_sleep;
+  gtcur->stats.count_of_waits++;
+  if (wait_time > gtcur->stats.wait.max)
+  {
+    gtcur->stats.wait.max = wait_time;
+  }
+  if (wait_time < gtcur->stats.wait.min || gtcur->stats.wait.min == 0)
+  {
+    gtcur->stats.wait.min = wait_time;
+  }
+  gtcur->stats.last_start = get_time_us();
+  gtcur->stats.wait.total += wait_time;
+}
+static void set_run_stats()
+{
+  if (gtcur->stats.last_start != 0) //never run before
+  {
+    long run_time = get_time_us() - gtcur->stats.last_start;
+    if (run_time > gtcur->stats.run.max)
+    {
+      gtcur->stats.run.max = run_time;
+    }
+    if (run_time < gtcur->stats.run.min || gtcur->stats.run.min == 0)
+    {
+      gtcur->stats.run.min = run_time;
+    }
+    gtcur->stats.last_sleep = get_time_us();
+    gtcur->stats.run.total += run_time;
+  }
+}
 // switch from one thread to other
 bool gtyield(void)
 {
@@ -56,21 +87,8 @@ bool gtyield(void)
       return false;
   }
 
-  if (gtcur->stats.last_start != 0) //never run before
-  {
-    long run_time = get_time_us() - gtcur->stats.last_start;
-    //printf("DEBUG: switch runtime: %ld now: %ld last_start %ld \n", run_time, get_time_us(), gtcur->stats.last_start);
-    gtcur->stats.last_sleep = get_time_us();
-    gtcur->stats.total_run_time += run_time;
-    if (run_time > gtcur->stats.max_run_time)
-    {
-      gtcur->stats.max_run_time = run_time;
-    }
-    if (run_time < gtcur->stats.min_run_time  || gtcur->stats.min_run_time==0)
-    {
-      gtcur->stats.min_run_time = run_time;
-    }
-  }
+  set_run_stats();
+
   if (gtcur->st != Unused) // switch current to Ready and new thread found in previous loop to Running
     gtcur->st = Ready;
   p->st = Running;
@@ -79,19 +97,7 @@ bool gtyield(void)
   gtcur = p;         // switch current indicator to new thread
   gtswtch(old, new); // perform context switch (assembly in gtswtch.S)
 
-  long wait_time = get_time_us() - gtcur->stats.last_sleep;
-  //printf("DEBUG: switch wait_time: %ld now: %ld last_sleep %ld \n", wait_time, get_time_us(), gtcur->stats.last_sleep);
-  gtcur->stats.count_of_waits++;
-  gtcur->stats.last_start = get_time_us();
-  gtcur->stats.total_waiting_time += wait_time;
-  if (wait_time > gtcur->stats.max_wait_time)
-  {
-    gtcur->stats.max_wait_time = wait_time;
-  }
-  if (wait_time < gtcur->stats.min_wait_time || gtcur->stats.min_wait_time==0)
-  {
-    gtcur->stats.min_wait_time = wait_time;
-  }
+  set_wait_stats();
 
   return true;
 }
@@ -100,6 +106,54 @@ bool gtyield(void)
 void gtstop(void)
 {
   gtret(0);
+}
+
+void showStatsHandler(int signum)
+{
+  static int end = 0;
+  static long last_called = 0;
+  printf("\n\n%-3s| %-9s| %-18s| %-18s| %-18s| %-9s| %-9s| %-9s| %-9s \n",
+         "ID", "STATE", "WAIT COUNT", "TOTAL RUNTIME", "TOTAL WAIT TIME", "MAX WAIT", "MIN WAIT", "MAX RUN", "MIN RUN");
+  for (int i = 0; i < MaxGThreads; i++)
+  {
+    if (gttbl[i].st == Ready || gttbl[i].st == Running)
+    {
+      printf("%-3d| %-9s| %-18ld| %-18ld| %-18ld| %-9ld| %-9ld| %-9ld| %-9ld\n", i, gttbl[i].st == Running ? "running" : "ready",
+             gttbl[i].stats.count_of_waits,
+             gttbl[i].stats.run.total,
+             gttbl[i].stats.wait.total,
+             gttbl[i].stats.wait.max,
+             gttbl[i].stats.wait.min,
+             gttbl[i].stats.run.max,
+             gttbl[i].stats.run.min);
+    }
+  }
+  printf("\n\n%-3s| %-9s| %-20s| %-20s \n",
+         "ID", "STATE", "RUNTIME %%", "WAIT TIME %%");
+  for (int i = 0; i < MaxGThreads; i++)
+  {
+    if (gttbl[i].st == Ready || gttbl[i].st == Running)
+    {
+      long duration = get_time_us() - gt_started;
+      printf("%-3d| %-9s| %-20f| %-20f \n", i, gttbl[i].st == Running ? "running" : "ready",
+             (double)gttbl[i].stats.run.total / (double)duration * 100.0,
+             (double)gttbl[i].stats.wait.total / (double)duration * 100.0);
+    }
+  }
+  if (last_called + 5 * 1000000L < get_time_us())
+  {
+    end = 0;
+    printf("End reseted. To end press ctrl + c three times in quick succesion");
+  }
+  else
+  {
+    printf("To end remains Ctrl + C: %d \n", 3 - (++end));
+  }
+  if (end > 2)
+  {
+    exit(0);
+  }
+  last_called = get_time_us();
 }
 
 // create new thread by providing pointer to function that will act like "run" method
