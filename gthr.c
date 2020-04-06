@@ -8,7 +8,10 @@ long get_time_us(void)
   timespec_get(&ts, TIME_UTC);
   return (long)ts.tv_sec * 1000000L + ts.tv_nsec / 1000; //us
 }
-
+int get_priority(struct priority_t pr)
+{
+  return pr.additional_priority + pr.priority;
+}
 // function triggered periodically by timer (SIGALRM)
 void gthandle(int sig)
 {
@@ -53,6 +56,7 @@ static void set_wait_stats()
   gtcur->stats.last_start = get_time_us();
   gtcur->stats.wait.total += wait_time;
 }
+
 static void set_run_stats()
 {
   if (gtcur->stats.last_start != 0) //never run before
@@ -70,6 +74,35 @@ static void set_run_stats()
     gtcur->stats.run.total += run_time;
   }
 }
+
+int find_max_priority()
+{
+  int max_priority = -1;
+  for (int i = 0; i < MaxGThreads; i++)
+  {
+    if (gttbl[i].st != Unused && get_priority(gttbl[i].pr) > max_priority)
+    {
+      max_priority = get_priority(gttbl[i].pr);
+    }
+  }
+  return max_priority;
+}
+
+void increase_other_threads(struct gt *p)
+{
+  struct gt *start = p;
+  do
+  { // iterate through gttbl[] until we find new thread in state Ready
+    if (++p == &gttbl[MaxGThreads])
+    { // at the end rotate to the beginning
+      p = &gttbl[0];
+    }
+    if (p->st != Running)
+    {
+      p->pr.additional_priority++;
+    }
+  } while (p != start);
+}
 // switch from one thread to other
 bool gtyield(void)
 {
@@ -79,19 +112,30 @@ bool gtyield(void)
   resetsig(SIGALRM); // reset signal
 
   p = gtcur;
-  while (p->st != Ready)
-  {                                 // iterate through gttbl[] until we find new thread in state Ready
-    if (++p == &gttbl[MaxGThreads]) // at the end rotate to the beginning
+
+  int max_priority = find_max_priority();
+  while (p->st != Ready || get_priority(p->pr) < max_priority)
+  { // iterate through gttbl[] until we find new thread in state Ready
+    if (++p == &gttbl[MaxGThreads])
+    { // at the end rotate to the beginning
       p = &gttbl[0];
+      increase_other_threads(p);
+    }
     if (p == gtcur) // did not find any other Ready threads
+    {
       return false;
+    }
   }
 
+  //printf("SWITCHING from %p to %p, priority %d to %d\n", &gtcur, &p, get_priority(gtcur->pr), get_priority(p->pr));
   set_run_stats();
 
-  if (gtcur->st != Unused) // switch current to Ready and new thread found in previous loop to Running
+  if (gtcur->st != Unused)
+  { // switch current to Ready and new thread found in previous loop to Running
     gtcur->st = Ready;
+  }
   p->st = Running;
+  p->pr.additional_priority = 0;
   old = &gtcur->ctx; // prepare pointers to context of current (will become old)
   new = &p->ctx;     // and new to new thread found in previous loop
   gtcur = p;         // switch current indicator to new thread
@@ -112,13 +156,13 @@ void showStatsHandler(int signum)
 {
   static int end = 0;
   static long last_called = 0;
-  printf("\n\n%-3s| %-9s| %-18s| %-18s| %-18s| %-9s| %-9s| %-9s| %-9s \n",
+  printf("\n\n%-3s| %-9s| %-18s| %-18s| %-18s| %-9s| %-9s| %-9s| %-9s| \n",
          "ID", "STATE", "WAIT COUNT", "TOTAL RUNTIME", "TOTAL WAIT TIME", "MAX WAIT", "MIN WAIT", "MAX RUN", "MIN RUN");
   for (int i = 0; i < MaxGThreads; i++)
   {
     if (gttbl[i].st == Ready || gttbl[i].st == Running)
     {
-      printf("%-3d| %-9s| %-18ld| %-18ld| %-18ld| %-9ld| %-9ld| %-9ld| %-9ld\n", i, gttbl[i].st == Running ? "running" : "ready",
+      printf("%-3d| %-9s| %-18ld| %-18ld| %-18ld| %-9ld| %-9ld| %-9ld| %-9ld|\n", i, gttbl[i].st == Running ? "running" : "ready",
              gttbl[i].stats.count_of_waits,
              gttbl[i].stats.run.total,
              gttbl[i].stats.wait.total,
@@ -128,16 +172,18 @@ void showStatsHandler(int signum)
              gttbl[i].stats.run.min);
     }
   }
-  printf("\n\n%-3s| %-9s| %-20s| %-20s \n",
-         "ID", "STATE", "RUNTIME %%", "WAIT TIME %%");
+  printf("\n\n%-3s| %-9s| %-20s| %-20s| %-10s| %-20s|\n",
+         "ID", "STATE", "RUNTIME %%", "WAIT TIME %%", "PRIORITY", "ADDITIONAL PRIORITY");
   for (int i = 0; i < MaxGThreads; i++)
   {
     if (gttbl[i].st == Ready || gttbl[i].st == Running)
     {
       long duration = get_time_us() - gt_started;
-      printf("%-3d| %-9s| %-20f| %-20f \n", i, gttbl[i].st == Running ? "running" : "ready",
+      printf("%-3d| %-9s| %-20f| %-20f| %-10d| %-20d| \n", i, gttbl[i].st == Running ? "running" : "ready",
              (double)gttbl[i].stats.run.total / (double)duration * 100.0,
-             (double)gttbl[i].stats.wait.total / (double)duration * 100.0);
+             (double)gttbl[i].stats.wait.total / (double)duration * 100.0,
+             gttbl[i].pr.priority,
+             gttbl[i].pr.additional_priority);
     }
   }
   if (last_called + 5 * 1000000L < get_time_us())
@@ -157,7 +203,7 @@ void showStatsHandler(int signum)
 }
 
 // create new thread by providing pointer to function that will act like "run" method
-int gtgo(void (*f)(void))
+int gtgo(void (*f)(void), int priority)
 {
   char *stack;
   struct gt *p;
@@ -177,6 +223,8 @@ int gtgo(void (*f)(void))
   p->ctx.rsp = (uint64_t)&stack[StackSize - 16];         //  set stack pointer
   p->st = Ready;                                         //  set state
   p->stats.last_sleep = get_time_us();
+  p->pr.priority = priority;
+  p->pr.additional_priority = 0;
 
   return 0;
 }

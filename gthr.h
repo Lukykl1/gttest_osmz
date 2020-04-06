@@ -11,14 +11,14 @@
 
 enum
 {
-  MaxGThreads = 5,      // Maximum number of threads, used as array size for gttbl
+  MaxGThreads = 10,     // Maximum number of threads, used as array size for gttbl
   StackSize = 0x400000, // Size of stack of each thread
 };
 struct one_stat_t
 {
- long total;
- long max;
- long min;
+  long total;
+  long max;
+  long min;
 };
 struct gt
 {
@@ -40,6 +40,11 @@ struct gt
     Running,
     Ready,
   } st;
+  struct priority_t
+  {
+    int priority;
+    int additional_priority;
+  } pr;
   struct stats_t
   {
     struct one_stat_t wait;
@@ -60,7 +65,7 @@ void gtret(int ret);                                    // terminate thread
 void gtswtch(struct gtctx *old, struct gtctx *new);     // declaration from gtswtch.S
 bool gtyield(void);                                     // yield and switch to another thread
 void gtstop(void);                                      // terminate current thread
-int gtgo(void (*f)(void));                              // create new thread and set f as new "run" function
+int gtgo(void (*f)(void), int priority);                // create new thread and set f as new "run" function
 void resetsig(int sig);                                 // reset signal
 void gthandle(int sig);                                 // periodically triggered by alarm
 int uninterruptibleNanoSleep(time_t sec, long nanosec); // uninterruptible sleep

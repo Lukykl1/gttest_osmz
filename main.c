@@ -39,10 +39,13 @@ void g(void)
 int main(void)
 {
   signal(SIGINT, showStatsHandler);
-  gtinit(); // initialize threads, see gthr.c
-  gtgo(f);  // set f() as first thread
-  gtgo(f);  // set f() as second thread
-  gtgo(g);  // set g() as third thread
-  gtgo(g);  // set g() as fourth thread
-  gtret(1); // wait until all threads terminate
+  gtinit();    // initialize threads, see gthr.c
+  gtgo(f, 10); // set f() as first thread
+  gtgo(f, 10); // set f() as first thread
+  gtgo(f, 9);  // set f() as second thread
+  gtgo(g, 6);  // set g() as third thread
+  gtgo(g, 2);  // set g() as third thread
+  gtgo(g, 2);  // set g() as fourth thread
+  gtgo(g, 0);  // set g() as fourth thread
+  gtret(1);    // wait until all threads terminate
 }
