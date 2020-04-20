@@ -44,6 +44,7 @@ struct gt
   {
     int priority;
     int additional_priority;
+    int tickets;
   } pr;
   struct stats_t
   {
@@ -55,17 +56,24 @@ struct gt
   } stats;
   //dobu běhu daného vlákna, dobu čekání na procesor, minimální, maximální a průměrnou hodnotu
 };
+typedef enum
+{
+  PRIORITY,
+  LOTTERY
+} scheduler_t;
 
 struct gt gttbl[MaxGThreads]; // statically allocated table for thread control
 struct gt *gtcur;             // pointer to current thread
 long gt_started;
+int total_active_tickets;
+scheduler_t scheduler;
 
-void gtinit(void);                                      // initialize gttbl
+void gtinit(scheduler_t type);                          // initialize gttbl
 void gtret(int ret);                                    // terminate thread
 void gtswtch(struct gtctx *old, struct gtctx *new);     // declaration from gtswtch.S
 bool gtyield(void);                                     // yield and switch to another thread
 void gtstop(void);                                      // terminate current thread
-int gtgo(void (*f)(void), int priority);                // create new thread and set f as new "run" function
+int gtgo(void (*f)(void), int priority, int tickets);   // create new thread and set f as new "run" function
 void resetsig(int sig);                                 // reset signal
 void gthandle(int sig);                                 // periodically triggered by alarm
 int uninterruptibleNanoSleep(time_t sec, long nanosec); // uninterruptible sleep
