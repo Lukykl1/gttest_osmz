@@ -135,6 +135,20 @@ bool gtyield(void)
       ticket_seen += gttbl[i].pr.tickets;
     }
   }
+  else if (scheduler == RR)
+  {
+    while (p->st != Ready)
+    { // iterate through gttbl[] until we find new thread in state Ready
+      if (++p == &gttbl[MaxGThreads])
+      { // at the end rotate to the beginning
+        p = &gttbl[0];
+      }
+      if (p == gtcur) // did not find any other Ready threads
+      {
+        return false;
+      }
+    }
+  }
   else
   {
     int max_priority = find_max_priority();
@@ -181,9 +195,10 @@ void showStatsHandler(int signum)
 {
   static int end = 0;
   static long last_called = 0;
-  printf("\n\nSCHEDULING TYPE: %s\n", scheduler == LOTTERY ? "lottery" : "priority");
+  printf("\n\nSCHEDULING TYPE: %s\n", scheduler == LOTTERY ? "lottery" : (scheduler == RR ? "round robin" : "priority"));
   printf("%-3s| %-9s| %-18s| %-18s| %-18s| %-9s| %-9s| %-9s| %-9s| \n",
          "ID", "STATE", "WAIT COUNT", "TOTAL RUNTIME", "TOTAL WAIT TIME", "MAX WAIT", "MIN WAIT", "MAX RUN", "MIN RUN");
+
   for (int i = 0; i < MaxGThreads; i++)
   {
     if (gttbl[i].st == Ready || gttbl[i].st == Running)
@@ -198,26 +213,44 @@ void showStatsHandler(int signum)
              gttbl[i].stats.run.min);
     }
   }
-  printf("\n\n%-3s| %-9s| %-20s| %-20s| %-10s| %-10s| %-10s|\n",
-         "ID", "STATE", "RUNTIME %%", "WAIT TIME %%", "PRIORITY", "ADD PRIOR", "TICKETS");
+  printf("\n\n%-3s| %-9s| %-20s| %-20s|",
+         "ID", "STATE", "RUNTIME %%", "WAIT TIME %%");
+  if (scheduler == LOTTERY)
+  {
+    printf(" %-10s|", "TICKETS");
+  }
+  if (scheduler == PRIORITY)
+  {
+    printf(" %-10s| %-10s|", "PRIORITY", "ADD PRIOR");
+  }
+  printf("\n");
   for (int i = 0; i < MaxGThreads; i++)
   {
     if (gttbl[i].st == Ready || gttbl[i].st == Running)
     {
       long duration = get_time_us() - gt_started;
-      printf("%-3d| %-9s| %-20f| %-20f| %-10d| %-10d| %-10d|\n", i, gttbl[i].st == Running ? "running" : "ready",
+      printf("%-3d| %-9s| %-20f| %-20f|", i, gttbl[i].st == Running ? "running" : "ready",
              (double)gttbl[i].stats.run.total / (double)duration * 100.0,
-             (double)gttbl[i].stats.wait.total / (double)duration * 100.0,
-             gttbl[i].pr.priority,
-             gttbl[i].pr.additional_priority,
-             gttbl[i].pr.tickets);
+             (double)gttbl[i].stats.wait.total / (double)duration * 100.0);
+      if (scheduler == LOTTERY)
+      {
+        printf(" %-10d|", gttbl[i].pr.tickets);
+      }
+      if (scheduler == PRIORITY)
+      {
+        printf(" %-10d| %-10d|", gttbl[i].pr.priority, gttbl[i].pr.additional_priority);
+      }
+      printf("\n");
     }
   }
-  printf("total tickets %d \n", total_active_tickets);
+  if (scheduler == LOTTERY)
+  {
+    printf("total tickets %d \n", total_active_tickets);
+  }
   if (last_called + 5 * 1000000L < get_time_us())
   {
     end = 0;
-    printf("End reseted. To end press ctrl + c three times in quick succesion");
+    printf("End reseted. To end press ctrl + c three times in quick succesion\n");
   }
   else
   {
@@ -229,7 +262,47 @@ void showStatsHandler(int signum)
   }
   last_called = get_time_us();
 }
-
+void my_sleep(int ms)
+{
+  long started = get_time_us();
+  long duration = ms * 1000;
+  while (started + duration > get_time_us())
+  {
+    gtyield();
+  }
+}
+void reset_stats(int thr_id)
+{
+  memset(&gttbl[thr_id].stats, 0, sizeof(struct stats_t));
+  gttbl[thr_id].stats.last_sleep = get_time_us();
+}
+void reset_all_stats()
+{
+  for (int i = 0; i < MaxGThreads; i++)
+  {
+    memset(&gttbl[i].stats, 0, sizeof(struct stats_t));
+    if (gttbl[i].st == Running)
+    {
+      gttbl[i].stats.last_start = get_time_us();
+    }
+    else
+    {
+      gttbl[i].stats.last_sleep = get_time_us();
+    }
+  }
+  gt_started = get_time_us();
+}
+void set_priority(int thr_id, int prio)
+{
+  gttbl[thr_id].pr.priority = prio;
+  gttbl[thr_id].pr.additional_priority = 0;
+}
+void set_tickets(int thr_id, int tickets)
+{
+  total_active_tickets -= gttbl[thr_id].pr.tickets;
+  gttbl[thr_id].pr.tickets = tickets;
+  total_active_tickets += tickets;
+}
 // create new thread by providing pointer to function that will act like "run" method
 int gtgo(void (*f)(void), int priority, int tickets)
 {

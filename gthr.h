@@ -59,7 +59,8 @@ struct gt
 typedef enum
 {
   PRIORITY,
-  LOTTERY
+  LOTTERY,
+  RR
 } scheduler_t;
 
 struct gt gttbl[MaxGThreads]; // statically allocated table for thread control
@@ -68,6 +69,11 @@ long gt_started;
 int total_active_tickets;
 scheduler_t scheduler;
 
+void my_sleep(int ms);
+void reset_stats(int thr_id);
+void reset_all_stats();
+void set_priority(int thr_id, int prio);
+void set_tickets(int thr_id, int tickets);
 void gtinit(scheduler_t type);                          // initialize gttbl
 void gtret(int ret);                                    // terminate thread
 void gtswtch(struct gtctx *old, struct gtctx *new);     // declaration from gtswtch.S
